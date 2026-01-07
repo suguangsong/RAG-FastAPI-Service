@@ -45,8 +45,11 @@ logs/
 *.pdf
 *.docx
 *.doc
-*.txt
-uploads/
+# 忽略上传目录中的文本文件，但保留项目配置文件
+uploads/*.txt
+uploads/*.pdf
+uploads/*.docx
+uploads/*.doc
 qdrant_storage/
 
 # 测试
