@@ -1,77 +1,60 @@
-"""向量存储服务模块"""
+"""向量存储服务模块 - 使用 LangChain"""
 from typing import List, Dict, Any, Optional
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
-from qdrant_client.http import models
-import uuid
 from loguru import logger
 from app.config import settings
+from langchain_qdrant import QdrantVectorStore
+from langchain_core.documents import Document
+from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 
 class VectorStore:
-    """向量存储服务"""
+    """向量存储服务 - 基于 LangChain Qdrant"""
 
-    def __init__(self):
+    def __init__(self, embeddings):
         self.client = QdrantClient(
             host=settings.qdrant_host,
             port=settings.qdrant_port
         )
         self.collection_name = settings.qdrant_collection_name
+        self.embeddings = embeddings
+        self._vector_store: Optional[QdrantVectorStore] = None
 
-    def ensure_collection(self, collection_name: str, vector_size: int = 1536):
-        """确保集合存在"""
-        try:
-            collections = self.client.get_collections().collections
-            collection_names = [col.name for col in collections]
-            
-            if collection_name not in collection_names:
-                self.client.create_collection(
-                    collection_name=collection_name,
-                    vectors_config=VectorParams(
-                        size=vector_size,
-                        distance=Distance.COSINE
-                    )
-                )
-                logger.info(f"创建集合: {collection_name}")
-        except Exception as e:
-            logger.error(f"创建集合失败: {collection_name}, 错误: {str(e)}")
-            raise
+    def _get_vector_store(self, collection_name: str) -> QdrantVectorStore:
+        """获取或创建向量存储"""
+        if self._vector_store is None or collection_name != self.collection_name:
+            self._vector_store = QdrantVectorStore(
+                client=self.client,
+                collection_name=collection_name,
+                embedding=self.embeddings
+            )
+            self.collection_name = collection_name
+        return self._vector_store
 
     async def add_documents(
         self,
         collection_name: str,
         texts: List[str],
-        embeddings: List[List[float]],
-        metadatas: List[Dict[str, Any]]
+        embeddings: List[List[float]] = None,
+        metadatas: List[Dict[str, Any]] = None
     ) -> List[str]:
         """添加文档到向量库"""
-        self.ensure_collection(collection_name, len(embeddings[0]) if embeddings else 1536)
-        
-        points = []
-        chunk_ids = []
-        
-        for idx, (text, embedding, metadata) in enumerate(zip(texts, embeddings, metadatas)):
-            chunk_id = str(uuid.uuid4())
-            chunk_ids.append(chunk_id)
-            
-            point = PointStruct(
-                id=hash(chunk_id) % (2**63),
-                vector=embedding,
-                payload={
-                    "chunk_id": chunk_id,
-                    "content": text,
-                    **metadata
-                }
-            )
-            points.append(point)
-        
         try:
-            self.client.upsert(
-                collection_name=collection_name,
-                points=points
-            )
-            logger.info(f"成功添加 {len(points)} 个文档到集合: {collection_name}")
-            return chunk_ids
+            vector_store = self._get_vector_store(collection_name)
+            
+            # 创建 LangChain Document 对象
+            documents = [
+                Document(
+                    page_content=text,
+                    metadata=metadata or {}
+                )
+                for text, metadata in zip(texts, metadatas or [{}] * len(texts))
+            ]
+            
+            # 使用 LangChain 添加文档（会自动生成向量）
+            ids = await vector_store.aadd_documents(documents)
+            logger.info(f"成功添加 {len(documents)} 个文档到集合: {collection_name}")
+            return ids if isinstance(ids, list) else [str(id) for id in ids]
         except Exception as e:
             logger.error(f"添加文档失败: {str(e)}")
             raise
@@ -86,33 +69,64 @@ class VectorStore:
     ) -> List[Dict[str, Any]]:
         """向量相似度搜索"""
         try:
-            search_filter = None
+            vector_store = self._get_vector_store(collection_name)
+            
+            # 构建查询
+            query = None
             if filter_condition:
+                # 构建 Qdrant Filter
                 conditions = []
                 for key, value in filter_condition.items():
                     conditions.append(
                         FieldCondition(key=key, match=MatchValue(value=value))
                     )
-                search_filter = Filter(must=conditions)
+                from qdrant_client.models import Filter as QdrantFilter
+                query_filter = QdrantFilter(must=conditions)
+            else:
+                query_filter = None
             
-            search_result = self.client.search(
-                collection_name=collection_name,
-                query_vector=query_vector,
-                limit=top_k,
-                score_threshold=score_threshold,
-                query_filter=search_filter
-            )
+            # 使用 LangChain 搜索（通过查询文本）
+            # 注意：LangChain Qdrant 主要通过文本搜索，我们需要使用相似度搜索
+            # 如果支持向量搜索，使用 asimilarity_search_with_score_by_vector
+            # 否则使用 asimilarity_search_with_score
+            try:
+                # 尝试使用向量搜索
+                results = await vector_store.asimilarity_search_with_score_by_vector(
+                    embedding=query_vector,
+                    k=top_k,
+                    score_threshold=score_threshold,
+                    filter=query_filter
+                )
+            except AttributeError:
+                # 如果不支持向量搜索，使用文本搜索（需要先获取查询文本）
+                # 这里我们需要回退到直接使用 Qdrant 客户端
+                from qdrant_client.models import SearchRequest
+                search_result = self.client.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    score_threshold=score_threshold,
+                    query_filter=query_filter
+                )
+                results = []
+                for result in search_result:
+                    doc = Document(
+                        page_content=result.payload.get("content", ""),
+                        metadata=result.payload
+                    )
+                    results.append((doc, result.score))
             
-            results = []
-            for result in search_result:
-                results.append({
-                    "chunk_id": result.payload.get("chunk_id", ""),
-                    "content": result.payload.get("content", ""),
-                    "score": float(result.score),
-                    "metadata": {k: v for k, v in result.payload.items() if k not in ["chunk_id", "content"]}
+            # 转换为统一格式
+            formatted_results = []
+            for doc, score in results:
+                formatted_results.append({
+                    "chunk_id": doc.metadata.get("chunk_id", ""),
+                    "content": doc.page_content,
+                    "score": float(score),
+                    "metadata": {k: v for k, v in doc.metadata.items() if k != "chunk_id"}
                 })
             
-            return results
+            return formatted_results
         except Exception as e:
             logger.error(f"向量搜索失败: {str(e)}")
             raise
@@ -120,6 +134,9 @@ class VectorStore:
     async def delete_by_doc_id(self, collection_name: str, doc_id: str) -> int:
         """根据文档 ID 删除所有相关向量"""
         try:
+            vector_store = self._get_vector_store(collection_name)
+            
+            # 使用 Qdrant 客户端直接删除
             filter_condition = Filter(
                 must=[
                     FieldCondition(key="doc_id", match=MatchValue(value=doc_id))
@@ -184,4 +201,3 @@ class VectorStore:
         except Exception as e:
             logger.error(f"获取文档 chunks 失败: {str(e)}")
             raise
-

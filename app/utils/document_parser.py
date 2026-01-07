@@ -1,24 +1,24 @@
-"""文档解析模块"""
+"""文档解析模块 - 使用 LangChain"""
 import io
-from typing import List, Dict, Any
+from typing import List
 from pathlib import Path
-import PyPDF2
-from docx import Document
 from loguru import logger
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from langchain_core.documents import Document
 
 
 class DocumentParser:
-    """文档解析器"""
+    """文档解析器 - 基于 LangChain"""
 
     @staticmethod
     def parse_pdf(file_content: bytes, filename: str) -> str:
         """解析 PDF 文件"""
         try:
+            # 创建临时文件对象
             pdf_file = io.BytesIO(file_content)
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+            loader = PyPDFLoader(pdf_file)
+            documents = loader.load()
+            text = "\n".join([doc.page_content for doc in documents])
             return text.strip()
         except Exception as e:
             logger.error(f"PDF 解析失败: {filename}, 错误: {str(e)}")
@@ -28,11 +28,11 @@ class DocumentParser:
     def parse_docx(file_content: bytes, filename: str) -> str:
         """解析 DOCX 文件"""
         try:
+            # 创建临时文件对象
             docx_file = io.BytesIO(file_content)
-            doc = Document(docx_file)
-            text = ""
-            for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
+            loader = Docx2txtLoader(docx_file)
+            documents = loader.load()
+            text = "\n".join([doc.page_content for doc in documents])
             return text.strip()
         except Exception as e:
             logger.error(f"DOCX 解析失败: {filename}, 错误: {str(e)}")
@@ -42,15 +42,25 @@ class DocumentParser:
     def parse_txt(file_content: bytes, filename: str) -> str:
         """解析 TXT 文件"""
         try:
-            text = file_content.decode('utf-8')
+            # 创建临时文件对象
+            txt_file = io.BytesIO(file_content)
+            loader = TextLoader(txt_file, encoding='utf-8')
+            documents = loader.load()
+            text = "\n".join([doc.page_content for doc in documents])
             return text.strip()
         except UnicodeDecodeError:
             try:
-                text = file_content.decode('gbk')
+                txt_file = io.BytesIO(file_content)
+                loader = TextLoader(txt_file, encoding='gbk')
+                documents = loader.load()
+                text = "\n".join([doc.page_content for doc in documents])
                 return text.strip()
             except Exception as e:
                 logger.error(f"TXT 解析失败: {filename}, 错误: {str(e)}")
                 raise ValueError(f"TXT 解析失败: 无法解码文件内容")
+        except Exception as e:
+            logger.error(f"TXT 解析失败: {filename}, 错误: {str(e)}")
+            raise ValueError(f"TXT 解析失败: {str(e)}")
 
     @classmethod
     def parse(cls, file_content: bytes, filename: str) -> str:
@@ -65,4 +75,3 @@ class DocumentParser:
             return cls.parse_txt(file_content, filename)
         else:
             raise ValueError(f"不支持的文件格式: {file_ext}")
-

@@ -1,4 +1,4 @@
-"""文档服务模块"""
+"""文档服务模块 - 使用 LangChain"""
 from typing import List, Dict, Any
 import uuid
 from datetime import datetime
@@ -17,7 +17,8 @@ class DocumentService:
         self.parser = DocumentParser()
         self.splitter = RecursiveCharacterTextSplitter()
         self.embedding_service = EmbeddingService()
-        self.vector_store = VectorStore()
+        # VectorStore 需要 embeddings 实例
+        self.vector_store = VectorStore(embeddings=self.embedding_service._embeddings)
         self.documents: Dict[str, Dict[str, Any]] = {}
 
     async def upload_document(
@@ -53,25 +54,24 @@ class DocumentService:
                 metadata=metadata or {}
             )
             
-            # 生成向量
+            # 准备文档数据（LangChain 会自动生成向量）
             texts = [chunk["content"] for chunk in chunks]
-            embeddings = await self.embedding_service.embed_texts(texts)
-            
-            # 存储到向量库
             metadatas = [
                 {
+                    "chunk_id": chunk.get("chunk_id", f"{doc_id}_{chunk['chunk_index']}"),
                     "doc_id": chunk["doc_id"],
                     "chunk_index": chunk["chunk_index"],
                     "filename": chunk["filename"],
-                    **chunk["metadata"]
+                    **{k: v for k, v in (chunk.get("metadata") or {}).items() if k not in ["chunk_id", "doc_id", "chunk_index", "filename"]}
                 }
                 for chunk in chunks
             ]
             
+            # 存储到向量库（LangChain 会自动生成向量）
             chunk_ids = await self.vector_store.add_documents(
                 collection_name=collection_name,
                 texts=texts,
-                embeddings=embeddings,
+                embeddings=None,  # LangChain 会自动生成
                 metadatas=metadatas
             )
             
@@ -143,4 +143,3 @@ class DocumentService:
         except Exception as e:
             logger.error(f"删除文档失败: {doc_id}, 错误: {str(e)}")
             raise
-

@@ -1,6 +1,5 @@
 """检索服务模块 - 混合检索"""
 from typing import List, Dict, Any, Optional
-import numpy as np
 from loguru import logger
 from app.config import settings
 from app.services.embedding_service import EmbeddingService
@@ -13,7 +12,8 @@ class RetrievalService:
 
     def __init__(self):
         self.embedding_service = EmbeddingService()
-        self.vector_store = VectorStore()
+        # VectorStore 需要 embeddings 实例
+        self.vector_store = VectorStore(embeddings=self.embedding_service._embeddings)
         self.bm25_service = BM25Service()
         self.alpha = settings.hybrid_search_alpha
 
@@ -65,8 +65,6 @@ class RetrievalService:
         )
         
         # 获取所有文档用于 BM25 索引
-        # 注意：这里简化处理，实际应该预先构建索引或使用更高效的方式
-        # 为了性能，我们使用向量检索结果来构建 BM25 索引
         if vector_results:
             try:
                 self.bm25_service.build_index(collection_name, vector_results)
@@ -164,4 +162,3 @@ class RetrievalService:
         
         normalized = [(s - min_score) / (max_score - min_score) for s in scores]
         return normalized
-

@@ -12,18 +12,21 @@ class Settings(BaseSettings):
     qdrant_collection_name: str = "default"
 
     # Embedding 模型配置
-    embedding_model: str = "openai"
-    embedding_model_name: str = "text-embedding-3-small"
+    embedding_model: str = "jina"
+    embedding_model_name: str = "jina-embeddings-v4"
+    embedding_dimension: int = 2048
+    jina_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     dashscope_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
     ollama_embedding_model: str = "nomic-embed-text"
 
     # LLM 配置
-    llm_provider: str = "openai"
-    llm_model_name: str = "gpt-4-turbo-preview"
+    llm_provider: str = "zhipuai"
+    llm_model_name: str = "glm-4"
     llm_temperature: float = 0.7
     llm_max_tokens: int = 2000
+    zhipuai_api_key: Optional[str] = None
     ollama_llm_model: str = "llama2"
 
     # Rerank 配置

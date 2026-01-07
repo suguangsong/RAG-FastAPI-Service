@@ -34,7 +34,7 @@
 
 ### 技术栈
 - **后端框架:** Python 3.10+ / FastAPI (异步支持)
-- **RAG 编排:** LangChain / LlamaIndex
+- **RAG 编排:** LangChain（统一接口，支持多种 LLM 和 Embedding 模型）
 - **向量引擎:** Qdrant (存储向量 + 元数据，支持 HNSW 索引)
 - **Embedding 模型:** OpenAI text-embedding-3-small / DashScope text-embedding-v2 / Ollama (本地)
 - **LLM 支持:** OpenAI GPT-4 / DashScope Qwen / Ollama (本地)
